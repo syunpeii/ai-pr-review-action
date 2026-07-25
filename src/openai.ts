@@ -110,6 +110,10 @@ export class OpenAIService {
     const additionalRulesSection = this.config.additionalRules 
       ? `\n## 追加ルール\n${this.config.additionalRules.trim()}`
       : '';
+    const language = (this.config.commentLanguage || 'ja').trim().toLowerCase();
+    const languageInstruction = language === 'en'
+      ? 'Write all summary and review comments in English.'
+      : '要約とレビューコメントはすべて日本語で記述してください。';
 
     return `あなたは${this.config.reviewerRole}です。PRレビューを実施し、以下の厳密な形式で回答してください。
 
@@ -179,6 +183,9 @@ filepath.kt:456
 - ${this.config.techStack}
 - テストの品質
 ${additionalRulesSection}
+
+## 言語指定
+${languageInstruction}
 
 ## レビューの視点
 - PRの変更内容（修正後のコード）を中心に評価してください
