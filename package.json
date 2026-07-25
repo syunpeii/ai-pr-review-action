@@ -9,8 +9,9 @@
   },
   "dependencies": {
     "@octokit/rest": "^20.0.2",
-    "node-fetch": "^3.3.2",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "minimatch": "^10.0.1",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",

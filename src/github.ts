@@ -1,5 +1,6 @@
 // path: scripts/review/src/github.ts
 import { Octokit } from '@octokit/rest';
+import { minimatch } from 'minimatch';
 import type { Config } from './config.js';
 import type { LineComment, TokenUsage } from './openai.js';
 
@@ -49,8 +50,10 @@ export class GitHubService {
       pull_number: this.config.pullNumber,
     });
 
+    const targetFiles = files.filter(file => !this.isExcludedFile(file.filename));
+
     const prFiles: PRFile[] = [];
-    for (const file of files) {
+    for (const file of targetFiles) {
       const prFile: PRFile = {
         filename: file.filename,
         status: file.status,
@@ -83,6 +86,21 @@ export class GitHubService {
       labels: pr.labels.map(label => typeof label === 'string' ? label : label.name || ''),
       files: prFiles,
     };
+  }
+
+  private isExcludedFile(filename: string): boolean {
+    const patterns = this.config.excludePatterns
+      .map(pattern => pattern.trim())
+      .filter(pattern => pattern.length > 0);
+
+    for (const pattern of patterns) {
+      if (minimatch(filename, pattern, { dot: true })) {
+        console.log(`⏭️  除外パターン一致のためスキップ: ${filename} (pattern: ${pattern})`);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private shouldFetchFullContent(filename: string, patch?: string): boolean {
