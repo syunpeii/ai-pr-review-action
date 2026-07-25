@@ -1,0 +1,63 @@
+name: "AI PR Review Action"
+description: "Review pull requests with OpenAI and post summary + line comments."
+author: "ru-mah"
+branding:
+  icon: "check-circle"
+  color: "purple"
+
+inputs:
+  openai_api_key:
+    description: "OpenAI API key."
+    required: true
+  github_token:
+    description: "GitHub token used to read PR files and post comments."
+    required: false
+    default: ""
+  model:
+    description: "OpenAI model name. If omitted, falls back to default_model in .ai-review.yml, then gpt-5-mini."
+    required: false
+    default: ""
+  max_output_tokens:
+    description: "Max completion tokens for OpenAI output."
+    required: false
+    default: "1500"
+  pr_number:
+    description: "PR number to review. If omitted, detected from event payload."
+    required: false
+    default: ""
+  config_path:
+    description: "Path to .ai-review.yml in the caller repository."
+    required: false
+    default: ".ai-review.yml"
+  custom_instructions:
+    description: "Additional review instructions appended to config additional_rules."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install dependencies
+      shell: bash
+      run: npm install
+      working-directory: ${{ github.action_path }}
+
+    - name: Run AI review
+      shell: bash
+      run: |
+        npm run build --prefix "${{ github.action_path }}"
+        node "${{ github.action_path }}/dist/index.js"
+      working-directory: ${{ github.workspace }}
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token || github.token }}
+        OPENAI_MODEL: ${{ inputs.model }}
+        OPENAI_MAX_OUTPUT_TOKENS: ${{ inputs.max_output_tokens }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        AI_REVIEW_CONFIG_PATH: ${{ inputs.config_path }}
+        AI_REVIEW_CUSTOM_INSTRUCTIONS: ${{ inputs.custom_instructions }}

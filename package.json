@@ -1,0 +1,21 @@
+{
+  "name": "ai-pr-review-action",
+  "version": "1.0.0",
+  "description": "GitHub Action for AI-based pull request review",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "review": "npm run build && node dist/index.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.2",
+    "node-fetch": "^3.3.2",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/js-yaml": "^4.0.5",
+    "typescript": "^5.3.3"
+  },
+  "type": "module"
+}
