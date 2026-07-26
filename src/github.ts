@@ -44,11 +44,7 @@ export class GitHubService {
       pull_number: this.config.pullNumber,
     });
 
-    const { data: files } = await this.octokit.rest.pulls.listFiles({
-      owner: this.config.owner,
-      repo: this.config.repo,
-      pull_number: this.config.pullNumber,
-    });
+    const files = await this.getAllPullRequestFiles();
 
     const targetFiles = files.filter(file => !this.isExcludedFile(file.filename));
 
@@ -223,11 +219,7 @@ export class GitHubService {
     const validComments: ReviewComment[] = [];
     
     // PRのファイル情報を取得（差分行情報を含む）
-    const { data: files } = await this.octokit.rest.pulls.listFiles({
-      owner: this.config.owner,
-      repo: this.config.repo,
-      pull_number: this.config.pullNumber,
-    });
+    const files = await this.getAllPullRequestFiles();
     
     for (let i = 0; i < comments.length; i++) {
       const comment = comments[i];
@@ -684,6 +676,15 @@ export class GitHubService {
     } catch (error) {
       console.warn('❌ 既存レビュー削除処理でエラー:', error);
     }
+  }
+
+  private async getAllPullRequestFiles() {
+    return this.octokit.paginate(this.octokit.rest.pulls.listFiles, {
+      owner: this.config.owner,
+      repo: this.config.repo,
+      pull_number: this.config.pullNumber,
+      per_page: 100,
+    });
   }
 
 }
