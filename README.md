@@ -75,7 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event.issue.pull_request &&
-      startsWith(github.event.comment.body, '/ai-review')
+      startsWith(github.event.comment.body, '/ai-review') &&
+      contains(fromJSON('["MEMBER", "OWNER", "COLLABORATOR"]'), github.event.comment.author_association)
     steps:
       - name: Parse comment
         id: parse
@@ -118,6 +119,7 @@ jobs:
 ```
 
 > **注意:** `issue_comment` トリガーはデフォルトブランチのコードで実行されるため、未信頼PRコードを実行しない安全な設計です。
+> 実行者は `MEMBER`、`OWNER`、`COLLABORATOR` に限定してください。Action 側でも同じ制限を検証するため、外部ユーザーによる API 利用料の消費を防げます。
 
 ## Inputs
 

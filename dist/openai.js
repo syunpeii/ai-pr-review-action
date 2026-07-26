@@ -43,11 +43,6 @@ export class OpenAIService {
             入力トークン: tokens?.prompt_tokens,
             出力トークン: tokens?.completion_tokens
         });
-        // コンテンツの最初と最後を表示（ログ制限回避）
-        if (content) {
-            console.log('🔍 コンテンツ先頭200文字:', content.substring(0, 200));
-            console.log('🔍 コンテンツ末尾200文字:', content.substring(content.length - 200));
-        }
         if (!content) {
             if (finishReason === 'length') {
                 throw new Error('❌ レスポンスがトークン制限により途中で切断されました。OPENAI_MAX_OUTPUT_TOKENS の値を増やしてください。');
@@ -155,59 +150,37 @@ ${languageInstruction}
 - 削除されたコードではなく、新しく追加されたコードや変更後のコードの妥当性を判断してください`;
     }
     parseReviewResponse(content) {
-        console.log('🔍 パース開始 - コンテンツ長:', content.length);
         let summary = '';
         const lineComments = [];
-        // 新しい形式での抽出を試行
         const summaryMatch = content.match(/\*\*SUMMARY_START\*\*([\s\S]*?)\*\*SUMMARY_END\*\*/);
         if (summaryMatch) {
             summary = summaryMatch[1].trim();
-            console.log('✅ 概要抽出成功 - 長さ:', summary.length);
         }
         else {
-            // フォールバック: 全体を概要として扱う
-            console.log('⚠️  マーカー形式未検出 - 全体を概要として使用');
+            console.warn('⚠️  マーカー形式未検出 - 全体を概要として使用');
             summary = content.trim();
         }
-        // Comments部分を抽出（より柔軟なマーカー対応）
         let commentsMatch = content.match(/\*\*COMMENTS_START\*\*([\s\S]*?)(\*\*COMMENTS_END\*\*|\*\*END\*\*)/);
-        // 終了マーカーが見つからない場合、COMMENTS_START以降をすべて取得
         if (!commentsMatch && content.includes('**COMMENTS_START**')) {
             const startIndex = content.indexOf('**COMMENTS_START**') + '**COMMENTS_START**'.length;
             const afterStart = content.substring(startIndex);
-            // 末尾のENDやその他のパターンを削除
             const cleanedComments = afterStart.replace(/\s*(END|end|\*\*END\*\*)\s*$/i, '').trim();
             commentsMatch = [content, cleanedComments, 'no-end-marker'];
         }
         if (commentsMatch) {
             const commentsSection = commentsMatch[1].trim();
-            console.log('✅ 行コメント部分抽出成功 - 長さ:', commentsSection.length);
-            console.log('🔍 使用された終了マーカー:', commentsMatch[2]);
             if (commentsSection) {
-                console.log('🔍 コメント部分の内容:', commentsSection.substring(0, 300));
                 const commentBlocks = this.splitCommentBlocks(commentsSection);
-                console.log('📋 解析したコメントブロック数:', commentBlocks.length);
-                if (commentBlocks.length > 0) {
-                    console.log('📝 最初のブロック例:', commentBlocks[0]);
-                }
                 for (const block of commentBlocks) {
-                    console.log('🔍 処理中のブロック:', block.substring(0, 100));
                     const comment = this.parseCommentBlock(block);
                     if (comment) {
                         lineComments.push(comment);
-                        console.log('✅ コメント追加成功:', comment.path + ':' + comment.line);
-                    }
-                    else {
-                        console.log('❌ コメント解析失敗');
                     }
                 }
             }
         }
         else {
-            console.log('⚠️  COMMENTS_START マーカーが見つかりませんでした');
-            console.log('🔍 コンテンツでCOMMENTS_STARTを検索:', content.includes('**COMMENTS_START**'));
-            console.log('🔍 コンテンツでCOMMENTS_ENDを検索:', content.includes('**COMMENTS_END**'));
-            console.log('🔍 コンテンツでENDを検索:', content.includes('**END**'));
+            console.warn('⚠️  COMMENTS_START マーカーが見つかりませんでした');
         }
         console.log('🎯 パース結果:', {
             概要文字数: summary.length,
@@ -222,51 +195,32 @@ ${languageInstruction}
         const lines = commentsSection.split('\n');
         const blocks = [];
         let currentBlock = [];
-        console.log('🔍 分割処理開始 - 総行数:', lines.length);
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const trimmed = line.trim();
-            console.log(`行${i}: "${trimmed}"`);
-            // ファイルパス:行番号 の形式をチェック（行番号なしもサポート）
             if (trimmed.match(/^[^:]+:\d+$/) || (trimmed.match(/^[^:\[\]]+\.(kt|java|xml|yml|yaml|gradle|json|properties)$/) && !trimmed.includes('['))) {
-                console.log('✅ ファイルパス パターン検出:', trimmed);
-                // 行番号がない場合は:1を追加
                 const normalizedLine = trimmed.includes(':') ? line : `${line.trim()}:1`;
-                console.log('📝 正規化後:', normalizedLine);
-                // 前のブロックを保存
                 if (currentBlock.length > 0) {
                     blocks.push(currentBlock.join('\n'));
-                    console.log('📦 ブロック保存 - 行数:', currentBlock.length);
                 }
-                // 新しいブロックを開始
                 currentBlock = [normalizedLine];
             }
             else if (currentBlock.length > 0) {
-                // **補足と提案**等の見出しを検出して、そこで現在のブロックを終了
                 if (trimmed.startsWith('**') && trimmed.endsWith('**') && trimmed.length > 4) {
-                    console.log('📝 見出し検出によりブロック終了:', trimmed);
-                    // 現在のブロックを保存してリセット
                     if (currentBlock.length > 0) {
                         blocks.push(currentBlock.join('\n'));
-                        console.log('📦 見出しによるブロック保存 - 行数:', currentBlock.length);
                         currentBlock = [];
                     }
                 }
                 else {
-                    // 現在のブロックに追加
                     currentBlock.push(line);
                 }
             }
-            else if (trimmed) {
-                console.log('⚠️  ブロック外のコンテンツ:', trimmed);
-            }
         }
-        // 最後のブロックを保存
         if (currentBlock.length > 0) {
             blocks.push(currentBlock.join('\n'));
-            console.log('📦 最後のブロック保存 - 行数:', currentBlock.length);
         }
-        console.log('🎯 分割完了 - ブロック総数:', blocks.length);
+        console.log(`📋 コメントブロック数: ${blocks.length}`);
         return blocks;
     }
     parseCommentBlock(block) {

@@ -63,8 +63,26 @@ export function loadConfig(): Config {
   let pullNumber = 0;
   
   if (process.env.GITHUB_EVENT_PATH) {
+    let eventData: any;
     try {
-      const eventData = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+      eventData = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+    } catch (error) {
+      console.warn('⚠️  Failed to parse GITHUB_EVENT_PATH:', error);
+    }
+
+    if (eventData) {
+      // issue_comment はリポジトリのシークレットを利用して実行されることがあるため、
+      // 信頼できるリポジトリ参加者からのコマンドだけを受け付ける。
+      if (eventData.issue && eventData.comment) {
+        const allowedAssociations = new Set(['MEMBER', 'OWNER', 'COLLABORATOR']);
+        const authorAssociation = eventData.comment.author_association;
+        if (!allowedAssociations.has(authorAssociation)) {
+          throw new Error(
+            'issue_comment からの実行は MEMBER、OWNER、COLLABORATOR に限定されています',
+          );
+        }
+      }
+
       // 1. pull_request.numberを最優先（pull_requestイベント）
       if (eventData.pull_request?.number) {
         pullNumber = parseInt(eventData.pull_request.number.toString(), 10);
@@ -77,8 +95,6 @@ export function loadConfig(): Config {
       else if (eventData.number) {
         pullNumber = parseInt(eventData.number.toString(), 10);
       }
-    } catch (error) {
-      console.warn('⚠️  Failed to parse GITHUB_EVENT_PATH:', error);
     }
   }
   
