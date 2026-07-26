@@ -65,7 +65,7 @@ async function main() {
             console.log(`✅ ${reviewComments.length} 件の行コメントをPRレビューとして投稿しました`);
         }
         else {
-            console.log('✅ レビュー済み状態として投稿しました（行コメントなし）');
+            console.log('✅ 行コメントはありませんでした。サマリーコメントのみ投稿しました');
         }
         console.log('🎉 AI PR Review が完了しました！');
     }
