@@ -18,9 +18,13 @@ inputs:
     required: false
     default: ""
   max_output_tokens:
-    description: "Max completion tokens for OpenAI output."
+    description: "Max completion tokens for OpenAI output. Leave empty for no Action-level limit."
     required: false
-    default: "1500"
+    default: ""
+  max_input_tokens:
+    description: "Approximate maximum input tokens sent to OpenAI. Leave empty for no Action-level truncation."
+    required: false
+    default: ""
   pr_number:
     description: "PR number to review. If omitted, detected from event payload."
     required: false
@@ -56,6 +60,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token || github.token }}
         OPENAI_MODEL: ${{ inputs.model }}
         OPENAI_MAX_OUTPUT_TOKENS: ${{ inputs.max_output_tokens }}
+        OPENAI_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
         PR_NUMBER: ${{ inputs.pr_number }}
         AI_REVIEW_CONFIG_PATH: ${{ inputs.config_path }}
         AI_REVIEW_CUSTOM_INSTRUCTIONS: ${{ inputs.custom_instructions }}

@@ -14,17 +14,20 @@ export class ContextBuilder {
         this.includePrBody = includePrBody;
         this.includePrLabels = includePrLabels;
     }
-    buildPrompt(prInfo, maxTokens) {
+    buildPrompt(prInfo, maxInputTokens) {
         this.truncatedDueToLimit = false;
         const basePrompt = this.buildBasePrompt(prInfo);
-        const estimatedTokens = this.estimateTokens(basePrompt);
-        // 通常は全体を使用、上限に近い場合のみ制限
-        if (estimatedTokens <= maxTokens * 0.8) {
+        if (maxInputTokens === undefined) {
             return { prompt: basePrompt, wasTruncated: false };
         }
-        // トークン上限に近いため入力を削減
+        const estimatedTokens = this.estimateTokens(basePrompt);
+        // 通常は全体を使用、上限を超える場合のみ制限
+        if (estimatedTokens <= maxInputTokens) {
+            return { prompt: basePrompt, wasTruncated: false };
+        }
+        // 入力トークン上限を超えるため入力を削減
         this.truncatedDueToLimit = true;
-        const truncatedPrompt = this.buildTruncatedPrompt(prInfo, maxTokens * 0.8);
+        const truncatedPrompt = this.buildTruncatedPrompt(prInfo, maxInputTokens);
         return { prompt: truncatedPrompt, wasTruncated: true };
     }
     getLibsVersionsContent() {

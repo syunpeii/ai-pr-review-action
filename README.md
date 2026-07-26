@@ -128,12 +128,27 @@ jobs:
 | `openai_api_key` | yes | - | OpenAI API key |
 | `github_token` | no | `github.token` | GitHub API 呼び出し用トークン |
 | `model` | no | `.ai-review.yml` の `default_model` → `gpt-5-mini` | 使用する OpenAI モデル。空文字の場合は設定ファイルのデフォルトを使用 |
-| `max_output_tokens` | no | `1500` | OpenAI 応答の最大トークン |
+| `max_output_tokens` | no | unset | OpenAI 応答の最大トークン。未指定時は Action 側で出力を制限しない。 |
+| `max_input_tokens` | no | unset | OpenAI に送る入力の概算最大トークン。未指定時は Action 側で PR 情報を切り詰めない。指定時は `file_priorities` 順に収める。 |
 | `pr_number` | no | auto-detect | レビュー対象PR番号 |
 | `config_path` | no | `.ai-review.yml` | レビュー設定ファイルのパス |
 | `custom_instructions` | no | `""` | 実行時に追加するレビュー指示 |
 
 ## Configuration file
+
+### トークン上限の設定
+
+`max_input_tokens` と `max_output_tokens` は Action の input として個別に設定できます。どちらも未指定の場合、Action 側では入力・出力を切り詰めません（利用するモデルと OpenAI API の制限は適用されます）。
+
+```yaml
+- uses: syunpeii/ai-pr-review-action@v1
+  with:
+    openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+    max_input_tokens: 20000
+    max_output_tokens: 2000
+```
+
+開始時の目安は、通常の PR では `max_input_tokens: 20000`、`max_output_tokens: 2000` です。大規模な PR や詳細なレビューが必要な場合は増やしてください。入力上限を指定した場合、上限を超える PR は `.ai-review.yml` の `file_priorities` が高いファイルから優先して送信されます。
 
 リポジトリルートに `.ai-review.yml` を置くことでレビュー観点を調整できます。ファイルが存在しない場合はすべてデフォルト値で動作します。
 

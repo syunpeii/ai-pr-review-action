@@ -30,7 +30,7 @@ async function main() {
         const prInfo = await github.getPRInfo();
         console.log(`📁 ${prInfo.files.length} ファイルの変更を検出`);
         console.log('🤖 AIレビューを生成中...');
-        const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, config.maxOutputTokens);
+        const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, config.maxInputTokens);
         const review = await openai.generateReview(prompt);
         // トークン制限による切り詰めがあった場合の警告追加
         if (wasTruncated) {

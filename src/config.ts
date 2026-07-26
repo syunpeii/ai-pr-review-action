@@ -7,7 +7,8 @@ export interface Config {
   openaiApiKey: string;
   openaiModel: string;
   githubToken: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
+  maxInputTokens?: number;
   owner: string;
   repo: string;
   pullNumber: number;
@@ -51,11 +52,13 @@ export function loadConfig(): Config {
     }
   }
 
-  const maxOutputTokens = parseInt(
-    process.env.OPENAI_MAX_OUTPUT_TOKENS ||
-      process.env.INPUT_MAX_OUTPUT_TOKENS ||
-      '1500',
-    10,
+  const maxOutputTokens = parseOptionalPositiveInteger(
+    process.env.OPENAI_MAX_OUTPUT_TOKENS || process.env.INPUT_MAX_OUTPUT_TOKENS,
+    'max_output_tokens',
+  );
+  const maxInputTokens = parseOptionalPositiveInteger(
+    process.env.OPENAI_MAX_INPUT_TOKENS || process.env.INPUT_MAX_INPUT_TOKENS,
+    'max_input_tokens',
   );
   
   const githubRepository = process.env.GITHUB_REPOSITORY;
@@ -138,6 +141,7 @@ export function loadConfig(): Config {
     openaiModel,
     githubToken: requiredEnvVars.githubToken!,
     maxOutputTokens,
+    maxInputTokens,
     owner,
     repo,
     pullNumber,
@@ -154,6 +158,17 @@ export function loadConfig(): Config {
     includePrBody: aiReviewConfig.include_pr_body !== false,
     includePrLabels: aiReviewConfig.include_pr_labels !== false,
   };
+}
+
+function parseOptionalPositiveInteger(value: string | undefined, name: string): number | undefined {
+  if (!value?.trim()) return undefined;
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`❌ ${name} には 1 以上の整数を指定してください`);
+  }
+
+  return parsed;
 }
 
 function loadAIReviewConfig(): AIReviewConfig {

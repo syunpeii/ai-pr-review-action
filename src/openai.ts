@@ -52,7 +52,9 @@ export class OpenAIService {
             content: prompt,
           },
         ],
-        max_completion_tokens: this.config.maxOutputTokens,
+        ...(this.config.maxOutputTokens === undefined
+          ? {}
+          : { max_completion_tokens: this.config.maxOutputTokens }),
       }),
     });
 
