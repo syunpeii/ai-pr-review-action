@@ -1,7 +1,7 @@
 // path: scripts/review/src/context.ts
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { load } from 'js-yaml';
+import { parse } from 'smol-toml';
 import type { PRInfo } from './github.js';
 
 export class ContextBuilder {
@@ -37,10 +37,11 @@ export class ContextBuilder {
 
     try {
       const content = readFileSync(libsVersionsPath, 'utf8');
-      const parsed = load(content) as any;
-      const kotlinVersion = parsed?.versions?.kotlin || 'unknown';
+      const parsed = parse(content);
+      const versions = parsed.versions as Record<string, unknown> | undefined;
+      const kotlinVersion = versions?.kotlin ?? 'unknown';
       
-      return `\n\n# プロジェクト情報\n\n**Kotlinバージョン**: ${kotlinVersion}\n**その他の主要ライブラリ**: ${JSON.stringify(parsed?.versions || {}, null, 2)}\n\n`;
+      return `\n\n# プロジェクト情報\n\n**Kotlinバージョン**: ${kotlinVersion}\n**その他の主要ライブラリ**: ${JSON.stringify(versions || {}, null, 2)}\n\n`;
     } catch (error) {
       console.warn('⚠️  Failed to read libs.versions.toml:', error);
       return '';
