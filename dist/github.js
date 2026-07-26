@@ -464,10 +464,11 @@ export class GitHubService {
     }
     async deleteExistingSummaryComment() {
         try {
-            const { data: comments } = await this.octokit.rest.issues.listComments({
+            const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
                 owner: this.config.owner,
                 repo: this.config.repo,
                 issue_number: this.config.pullNumber,
+                per_page: 100,
             });
             const botComments = comments.filter(comment => comment.user?.login === 'rumahbot' || comment.body?.includes('🤖 AI レビュー結果'));
             for (const comment of botComments) {
