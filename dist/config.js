@@ -2,6 +2,29 @@
 import { readFileSync, existsSync } from 'fs';
 import { load } from 'js-yaml';
 import { resolve } from 'path';
+import { z } from 'zod';
+const aiReviewConfigSchema = z.object({
+    reviewer_role: z.string().max(500).optional(),
+    tech_stack: z.string().max(2_000).optional(),
+    review_focus: z.string().max(2_000).optional(),
+    additional_rules: z.string().max(10_000).optional(),
+    default_model: z.string().min(1).max(200).optional(),
+    file_priorities: z
+        .record(z.string().min(1).max(50), z.number().int().min(1).max(10))
+        .refine((priorities) => Object.keys(priorities).length <= 100, {
+        message: '最大100件まで指定できます',
+    })
+        .optional(),
+    exclude_patterns: z.array(z.string().min(1).max(500)).max(100).optional(),
+    comment_language: z
+        .string()
+        .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, '言語タグの形式で指定してください')
+        .max(35)
+        .optional(),
+    include_pr_title: z.boolean().optional(),
+    include_pr_body: z.boolean().optional(),
+    include_pr_labels: z.boolean().optional(),
+}).strict();
 export function loadConfig() {
     const openaiApiKey = process.env.OPENAI_API_KEY || process.env.INPUT_OPENAI_API_KEY;
     const githubToken = process.env.GITHUB_TOKEN || process.env.INPUT_GITHUB_TOKEN;
@@ -120,13 +143,19 @@ function loadAIReviewConfig() {
     }
     try {
         const configContent = readFileSync(configPath, 'utf8');
-        const config = load(configContent);
+        const parsedConfig = aiReviewConfigSchema.safeParse(load(configContent));
+        if (!parsedConfig.success) {
+            const details = parsedConfig.error.issues
+                .map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`)
+                .join('; ');
+            throw new Error(details);
+        }
+        const config = parsedConfig.data;
         console.log(`📄 Loaded configuration from ${configuredPath}`);
-        return config || {};
+        return config;
     }
     catch (error) {
-        console.warn(`⚠️  Failed to load ${configuredPath}:`, error);
-        console.log('📄 Using default configuration.');
-        return {};
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`❌ ${configuredPath} の設定が不正です: ${message}`);
     }
 }

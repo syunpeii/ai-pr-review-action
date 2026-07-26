@@ -190,6 +190,8 @@ comment_language: "ja"
 
 PR レビューでは、PR タイトル・本文・ラベル・対象ファイルの差分、ならびに条件に応じたファイル全文を OpenAI API に送信します。PR メタデータは上記の `include_pr_*` 設定で個別に除外でき、ファイルは `exclude_patterns` で除外できます。既定ではすべて送信されます。
 
+設定ファイルは厳格に検証されます。未知のフィールド、型の不一致、不正な値がある場合は Action を停止します。`file_priorities` の値は `1`〜`10` の整数（最大100件）、`exclude_patterns` は最大100件・各500文字までです。テキスト項目にも長さの上限があります。`comment_language` は `ja`、`en`、`en-US` などの言語タグ形式を受け付け、特定の言語には限定しません。
+
 ### `additional_rules` と `custom_instructions` の関係
 
 `additional_rules`（`.ai-review.yml`）と Action input の `custom_instructions` は **両方指定した場合に結合**されます。
