@@ -46,14 +46,9 @@ runs:
       with:
         node-version: "20"
 
-    - name: Install dependencies
-      shell: bash
-      run: npm ci --omit=dev
-      working-directory: ${{ github.action_path }}
-
     - name: Run AI review
       shell: bash
-      run: node "${{ github.action_path }}/dist/index.js"
+      run: node "${{ github.action_path }}/bundle/index.js"
       working-directory: ${{ github.workspace }}
       env:
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}

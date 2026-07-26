@@ -2,9 +2,10 @@
   "name": "ai-pr-review-action",
   "version": "1.0.0",
   "description": "GitHub Action for AI-based pull request review",
-  "main": "dist/index.js",
+  "main": "bundle/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run bundle",
+    "bundle": "ncc build dist/index.js -o bundle",
     "review": "npm run build && node dist/index.js"
   },
   "dependencies": {
@@ -15,8 +16,9 @@
     "smol-toml": "^1.7.0"
   },
   "devDependencies": {
-    "@types/node": "^20.10.5",
     "@types/js-yaml": "^4.0.5",
+    "@types/node": "^20.10.5",
+    "@vercel/ncc": "^0.38.3",
     "typescript": "^5.3.3"
   },
   "type": "module"
