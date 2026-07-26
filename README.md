@@ -200,3 +200,6 @@ additionalRules = additional_rules + "\n\n" + custom_instructions
 
 - `issue_comment` で動かす場合は、未信頼PRコード実行のリスクを避けるため workflow 設計に注意してください。
 - 最小権限で実行してください（`pull-requests: write`, `contents: read`）。
+- 外部 fork からの PR に対して `pull_request_target` を使う場合は、PR の `head.sha` を checkout したり、PR 側のコードをビルド・実行したりしないでください。`pull_request_target` はベースリポジトリの権限とシークレットを利用できるため、未信頼コードの実行はシークレットや書込権限の漏えいにつながります。
+- 通常は `pull_request`、または実行者を `MEMBER` / `OWNER` / `COLLABORATOR` に制限した `issue_comment` を使用してください。
+- OpenAI API キーは、この Action 専用の Project で発行することを推奨します。Project の Limits で使用可能なモデルを必要なものだけに限定し、コストを確実に抑止したい場合は月次のハード予算上限を設定してください。通知のみの予算アラートでは、上限を超えても API リクエストは継続します。
