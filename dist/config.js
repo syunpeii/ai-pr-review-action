@@ -95,6 +95,9 @@ export function loadConfig() {
         },
         excludePatterns: aiReviewConfig.exclude_patterns || [],
         commentLanguage: aiReviewConfig.comment_language || 'ja',
+        includePrTitle: aiReviewConfig.include_pr_title !== false,
+        includePrBody: aiReviewConfig.include_pr_body !== false,
+        includePrLabels: aiReviewConfig.include_pr_labels !== false,
     };
 }
 function loadAIReviewConfig() {

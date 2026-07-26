@@ -25,7 +25,7 @@ async function main() {
         console.log(`📋 PR #${config.pullNumber} をレビューします`);
         const github = new GitHubService(config);
         const openai = new OpenAIService(config);
-        const contextBuilder = new ContextBuilder(config.filePriorities);
+        const contextBuilder = new ContextBuilder(config.filePriorities, config.includePrTitle, config.includePrBody, config.includePrLabels);
         console.log('📥 PR情報を取得中...');
         const prInfo = await github.getPRInfo();
         console.log(`📁 ${prInfo.files.length} ファイルの変更を検出`);

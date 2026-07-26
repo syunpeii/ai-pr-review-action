@@ -18,6 +18,9 @@ export interface Config {
   filePriorities: Record<string, number>;
   excludePatterns: string[];
   commentLanguage: string;
+  includePrTitle: boolean;
+  includePrBody: boolean;
+  includePrLabels: boolean;
 }
 
 interface AIReviewConfig {
@@ -29,6 +32,9 @@ interface AIReviewConfig {
   file_priorities?: Record<string, number>;
   exclude_patterns?: string[];
   comment_language?: string;
+  include_pr_title?: boolean;
+  include_pr_body?: boolean;
+  include_pr_labels?: boolean;
 }
 
 export function loadConfig(): Config {
@@ -144,6 +150,9 @@ export function loadConfig(): Config {
     },
     excludePatterns: aiReviewConfig.exclude_patterns || [],
     commentLanguage: aiReviewConfig.comment_language || 'ja',
+    includePrTitle: aiReviewConfig.include_pr_title !== false,
+    includePrBody: aiReviewConfig.include_pr_body !== false,
+    includePrLabels: aiReviewConfig.include_pr_labels !== false,
   };
 }
 

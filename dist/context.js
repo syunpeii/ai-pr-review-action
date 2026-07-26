@@ -5,8 +5,14 @@ import { parse } from 'smol-toml';
 export class ContextBuilder {
     truncatedDueToLimit = false;
     filePriorities = {};
-    constructor(filePriorities) {
+    includePrTitle;
+    includePrBody;
+    includePrLabels;
+    constructor(filePriorities, includePrTitle, includePrBody, includePrLabels) {
         this.filePriorities = filePriorities;
+        this.includePrTitle = includePrTitle;
+        this.includePrBody = includePrBody;
+        this.includePrLabels = includePrLabels;
     }
     buildPrompt(prInfo, maxTokens) {
         this.truncatedDueToLimit = false;
@@ -40,11 +46,13 @@ export class ContextBuilder {
     }
     buildBasePrompt(prInfo) {
         let prompt = `# PR情報\n\n`;
-        prompt += `**タイトル**: ${prInfo.title}\n\n`;
-        if (prInfo.body) {
+        if (this.includePrTitle) {
+            prompt += `**タイトル**: ${prInfo.title}\n\n`;
+        }
+        if (this.includePrBody && prInfo.body) {
             prompt += `**説明**:\n${prInfo.body}\n\n`;
         }
-        if (prInfo.labels.length > 0) {
+        if (this.includePrLabels && prInfo.labels.length > 0) {
             prompt += `**ラベル**: ${prInfo.labels.join(', ')}\n\n`;
         }
         // libs.versions.tomlの情報を追加
@@ -67,11 +75,13 @@ export class ContextBuilder {
     }
     buildTruncatedPrompt(prInfo, maxTokens) {
         let prompt = `# PR情報\n\n`;
-        prompt += `**タイトル**: ${prInfo.title}\n\n`;
-        if (prInfo.body && prInfo.body.length < 500) {
+        if (this.includePrTitle) {
+            prompt += `**タイトル**: ${prInfo.title}\n\n`;
+        }
+        if (this.includePrBody && prInfo.body && prInfo.body.length < 500) {
             prompt += `**説明**:\n${prInfo.body}\n\n`;
         }
-        if (prInfo.labels.length > 0) {
+        if (this.includePrLabels && prInfo.labels.length > 0) {
             prompt += `**ラベル**: ${prInfo.labels.join(', ')}\n\n`;
         }
         // libs.versions.tomlの情報を追加（truncated版でも重要）

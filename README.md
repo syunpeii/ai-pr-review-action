@@ -150,6 +150,10 @@ file_priorities:
   md: 5
 exclude_patterns:
   - "**/generated/**"
+# 既定ではPRメタデータを送信。必要に応じて個別に除外できます。
+include_pr_title: true
+include_pr_body: true
+include_pr_labels: true
 comment_language: "ja"
 ```
 
@@ -164,7 +168,12 @@ comment_language: "ja"
 | `default_model` | `""` | デフォルトで使用するモデル名。Action input の `model` が空のときに参照されます。例: `"gpt-5"` |
 | `file_priorities` | `kt:10, gradle:9, xml:8, json:7, yml:6, md:5` | 拡張子ごとのレビュー優先度（1〜10）。PRが大きくトークン上限に近い場合、優先度の高いファイルから処理されます。 |
 | `exclude_patterns` | `[]` | レビュー対象から除外するファイルのglobパターン。例: `"**/generated/**"`, `"**/build/**"` |
+| `include_pr_title` | `true` | `false` にすると PR タイトルを OpenAI API に送信しない。 |
+| `include_pr_body` | `true` | `false` にすると PR 本文を OpenAI API に送信しない。 |
+| `include_pr_labels` | `true` | `false` にすると PR ラベルを OpenAI API に送信しない。 |
 | `comment_language` | `"ja"` | レビューコメントの言語コード。`"ja"` または `"en"` など。 |
+
+PR レビューでは、PR タイトル・本文・ラベル・対象ファイルの差分、ならびに条件に応じたファイル全文を OpenAI API に送信します。PR メタデータは上記の `include_pr_*` 設定で個別に除外でき、ファイルは `exclude_patterns` で除外できます。既定ではすべて送信されます。
 
 ### `additional_rules` と `custom_instructions` の関係
 

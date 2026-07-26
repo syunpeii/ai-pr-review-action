@@ -7,9 +7,20 @@ import type { PRInfo } from './github.js';
 export class ContextBuilder {
   private truncatedDueToLimit = false;
   private filePriorities: Record<string, number> = {};
+  private includePrTitle: boolean;
+  private includePrBody: boolean;
+  private includePrLabels: boolean;
 
-  constructor(filePriorities: Record<string, number>) {
+  constructor(
+    filePriorities: Record<string, number>,
+    includePrTitle: boolean,
+    includePrBody: boolean,
+    includePrLabels: boolean,
+  ) {
     this.filePriorities = filePriorities;
+    this.includePrTitle = includePrTitle;
+    this.includePrBody = includePrBody;
+    this.includePrLabels = includePrLabels;
   }
 
   buildPrompt(prInfo: PRInfo, maxTokens: number): { prompt: string; wasTruncated: boolean } {
@@ -50,13 +61,15 @@ export class ContextBuilder {
 
   private buildBasePrompt(prInfo: PRInfo): string {
     let prompt = `# PR情報\n\n`;
-    prompt += `**タイトル**: ${prInfo.title}\n\n`;
+    if (this.includePrTitle) {
+      prompt += `**タイトル**: ${prInfo.title}\n\n`;
+    }
     
-    if (prInfo.body) {
+    if (this.includePrBody && prInfo.body) {
       prompt += `**説明**:\n${prInfo.body}\n\n`;
     }
 
-    if (prInfo.labels.length > 0) {
+    if (this.includePrLabels && prInfo.labels.length > 0) {
       prompt += `**ラベル**: ${prInfo.labels.join(', ')}\n\n`;
     }
 
@@ -87,13 +100,15 @@ export class ContextBuilder {
 
   private buildTruncatedPrompt(prInfo: PRInfo, maxTokens: number): string {
     let prompt = `# PR情報\n\n`;
-    prompt += `**タイトル**: ${prInfo.title}\n\n`;
+    if (this.includePrTitle) {
+      prompt += `**タイトル**: ${prInfo.title}\n\n`;
+    }
     
-    if (prInfo.body && prInfo.body.length < 500) {
+    if (this.includePrBody && prInfo.body && prInfo.body.length < 500) {
       prompt += `**説明**:\n${prInfo.body}\n\n`;
     }
 
-    if (prInfo.labels.length > 0) {
+    if (this.includePrLabels && prInfo.labels.length > 0) {
       prompt += `**ラベル**: ${prInfo.labels.join(', ')}\n\n`;
     }
 
