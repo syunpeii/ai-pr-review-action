@@ -134,15 +134,11 @@ export class GitHubService {
     console.log('🗑️  既存レビューの削除を開始...');
     await this.deleteExistingReviews();
 
-    console.log('📝 フォーマット前の概要コメント:', summary);
     const formattedSummary = this.formatSummaryContent(summary);
-    console.log('📝 フォーマット後の概要コメント:', formattedSummary);
     
     const reviewBody = formattedSummary 
       ? `## 🤖 AI レビュー結果\n\n${formattedSummary}`
       : `## 🤖 AI レビュー結果\n\nレビューを完了しました。`;
-
-    console.log('📝 最終的なレビューボディ長:', reviewBody.length);
 
     await this.octokit.rest.pulls.createReview({
       owner: this.config.owner,
@@ -157,9 +153,7 @@ export class GitHubService {
   private formatSummaryContent(content: string): string {
     if (!content) return '';
     
-    console.log('🔍 フォーマット処理開始 - 元の長さ:', content.length);
-    
-    const formatted = content
+    return content
       .trim()
       // **見出し** の後に改行を確保
       .replace(/(\*\*[^*]+\*\*)\s*/g, '$1\n\n')
@@ -170,10 +164,6 @@ export class GitHubService {
       // 連続する改行を制限
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-    
-    console.log('🔍 フォーマット処理完了 - 処理後の長さ:', formatted.length);
-    
-    return formatted;
   }
 
   async postReviewComments(comments: ReviewComment[], originalComments?: LineComment[]): Promise<void> {
