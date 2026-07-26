@@ -1,6 +1,7 @@
 // path: scripts/review/src/github.ts
 import { Octokit } from '@octokit/rest';
 import { minimatch } from 'minimatch';
+const SUMMARY_COMMENT_MARKER = '<!-- ai-pr-review-action:summary -->';
 export class GitHubService {
     octokit;
     config;
@@ -78,7 +79,7 @@ export class GitHubService {
             owner: this.config.owner,
             repo: this.config.repo,
             issue_number: this.config.pullNumber,
-            body: `## 🤖 AI レビュー結果\n\n${formattedContent}\n\n${footer}`,
+            body: `## 🤖 AI レビュー結果\n\n${formattedContent}\n\n${footer}\n\n${SUMMARY_COMMENT_MARKER}`,
         });
         this.existingCommentId = comment.id;
     }
@@ -464,7 +465,7 @@ export class GitHubService {
                 issue_number: this.config.pullNumber,
                 per_page: 100,
             });
-            const botComments = comments.filter(comment => comment.user?.login === 'rumahbot' || comment.body?.includes('🤖 AI レビュー結果'));
+            const botComments = comments.filter(comment => comment.body?.includes(SUMMARY_COMMENT_MARKER));
             for (const comment of botComments) {
                 await this.octokit.rest.issues.deleteComment({
                     owner: this.config.owner,
