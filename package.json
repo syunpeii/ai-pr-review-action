@@ -2,6 +2,7 @@
   "name": "ai-pr-review-action",
   "version": "1.0.0",
   "description": "GitHub Action for AI-based pull request review",
+  "license": "MIT",
   "main": "bundle/index.js",
   "scripts": {
     "build": "tsc && npm run bundle",
