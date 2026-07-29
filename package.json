@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc && npm run bundle",
     "bundle": "ncc build dist/index.js -o bundle",
-    "review": "npm run build && node dist/index.js"
+    "review": "npm run build && node dist/index.js",
+    "test": "npm run build && node --test test/openai.test.mjs"
   },
   "dependencies": {
     "@octokit/rest": "^20.0.2",

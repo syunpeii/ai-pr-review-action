@@ -25,16 +25,18 @@ export interface LineComment {
 
 export class OpenAIService {
   private config: Config;
+  private fetchImpl: typeof fetch;
 
-  constructor(config: Config) {
+  constructor(config: Config, fetchImpl: typeof fetch = fetch) {
     this.config = config;
+    this.fetchImpl = fetchImpl;
   }
 
   async generateReview(prompt: string): Promise<ReviewResult> {
     const model = this.config.openaiModel;
     console.log(`🤖 使用モデル: ${model}`);
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await this.fetchImpl('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -42,19 +44,31 @@ export class OpenAIService {
       },
       body: JSON.stringify({
         model,
-        messages: [
+        // PR の差分やレビュー結果を Responses API の Application State に保持しない。
+        store: false,
+        input: [
           {
             role: 'system',
-            content: this.getSystemPrompt(),
+            content: [
+              {
+                type: 'input_text',
+                text: this.getSystemPrompt(),
+              },
+            ],
           },
           {
             role: 'user',
-            content: prompt,
+            content: [
+              {
+                type: 'input_text',
+                text: prompt,
+              },
+            ],
           },
         ],
         ...(this.config.maxOutputTokens === undefined
           ? {}
-          : { max_completion_tokens: this.config.maxOutputTokens }),
+          : { max_output_tokens: this.config.maxOutputTokens }),
       }),
     });
 
@@ -64,33 +78,35 @@ export class OpenAIService {
     }
 
     const data = await response.json() as any;
-    
-    const content = data.choices?.[0]?.message?.content;
-    const finishReason = data.choices?.[0]?.finish_reason;
-    const tokens = data.usage;
+
+    const content = this.extractResponseText(data);
+    const finishReason = data?.status === 'incomplete'
+      ? data?.incomplete_details?.reason ?? 'incomplete'
+      : data?.status ?? data?.output?.[0]?.status;
+    const tokens = data?.usage;
     
     console.log('🔍 API統計:', {
       コンテンツ長: content?.length || 0,
       終了理由: finishReason,
-      入力トークン: tokens?.prompt_tokens,
-      出力トークン: tokens?.completion_tokens
+      入力トークン: tokens?.input_tokens,
+      出力トークン: tokens?.output_tokens
     });
     
     if (!content) {
-      if (finishReason === 'length') {
+      if (finishReason === 'incomplete' || finishReason === 'max_output_tokens') {
         throw new Error('❌ レスポンスがトークン制限により途中で切断されました。OPENAI_MAX_OUTPUT_TOKENS の値を増やしてください。');
       }
       throw new Error(`❌ OpenAI APIからレスポンスを取得できませんでした。終了理由: ${finishReason}`);
     }
 
-    if (finishReason === 'length') {
+    if (finishReason === 'incomplete' || finishReason === 'max_output_tokens') {
       console.log('⚠️  警告: レスポンスがトークン制限により途中で切断された可能性があります');
     }
 
     const tokenUsage: TokenUsage = {
-      promptTokens: tokens?.prompt_tokens || 0,
-      completionTokens: tokens?.completion_tokens || 0,
-      totalTokens: tokens?.total_tokens || 0,
+      promptTokens: tokens?.input_tokens || 0,
+      completionTokens: tokens?.output_tokens || 0,
+      totalTokens: tokens?.total_tokens || ((tokens?.input_tokens || 0) + (tokens?.output_tokens || 0)),
     };
 
     const { summary, lineComments } = this.parseReviewResponse(content);
@@ -100,6 +116,27 @@ export class OpenAIService {
       model,
       tokenUsage,
     };
+  }
+
+  private extractResponseText(data: any): string | undefined {
+    if (typeof data?.output_text === 'string' && data.output_text.trim()) {
+      return data.output_text;
+    }
+
+    const output = Array.isArray(data?.output) ? data.output : [];
+    const texts: string[] = [];
+
+    for (const item of output) {
+      const content = Array.isArray(item?.content) ? item.content : [];
+      for (const part of content) {
+        if (typeof part?.text === 'string' && part.text.trim()) {
+          texts.push(part.text);
+        }
+      }
+    }
+
+    const joined = texts.join('\n').trim();
+    return joined || undefined;
   }
 
   private getSystemPrompt(): string {
