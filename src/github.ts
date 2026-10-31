@@ -111,7 +111,12 @@ export class GitHubService {
     return isSmallFile || isConfigFile || (isKotlinFile && patch.split('\n').length < 100);
   }
 
-  async postSummaryComment(content: string, model: string, tokenUsage: TokenUsage): Promise<void> {
+  async postSummaryComment(
+    content: string,
+    model: string,
+    tokenUsage: TokenUsage,
+    metadata = '',
+  ): Promise<void> {
     await this.deleteExistingSummaryComment();
 
     // 改行が適切に表示されるようにフォーマット
@@ -122,7 +127,7 @@ export class GitHubService {
       owner: this.config.owner,
       repo: this.config.repo,
       issue_number: this.config.pullNumber,
-      body: `## 🤖 AI レビュー結果\n\n${formattedContent}\n\n${footer}\n\n${SUMMARY_COMMENT_MARKER}`,
+      body: `## 🤖 AI レビュー結果\n\n${[formattedContent, metadata].filter(Boolean).join('\n\n')}\n\n${footer}\n\n${SUMMARY_COMMENT_MARKER}`,
     });
 
     this.existingCommentId = comment.id;

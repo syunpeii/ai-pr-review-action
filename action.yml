@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ""
   model:
-    description: "OpenAI model name. If omitted, falls back to default_model in .ai-review.yml, then gpt-5-mini."
+    description: "OpenAI model name. If omitted, falls back to default_model in .ai-review.yml, then gpt-6-luna."
     required: false
     default: ""
   max_output_tokens:
@@ -25,6 +25,14 @@ inputs:
     description: "Approximate maximum input tokens sent to OpenAI. Leave empty for no Action-level truncation."
     required: false
     default: ""
+  max_pr_body_chars:
+    description: "Max characters of the normal PR body (excluding the AI_REVIEW_INSTRUCTIONS block) sent to OpenAI. Excess is omitted at a paragraph/line boundary. Defaults to 10000."
+    required: false
+    default: "10000"
+  review_mode:
+    description: "Review mode: 'single' (default, one pass) or 'verified' (generate a draft, then verify it against the code before posting)."
+    required: false
+    default: "single"
   pr_number:
     description: "PR number to review. If omitted, detected from event payload."
     required: false
@@ -33,10 +41,6 @@ inputs:
     description: "Path to .ai-review.yml in the caller repository."
     required: false
     default: ".ai-review.yml"
-  custom_instructions:
-    description: "Additional review instructions appended to config additional_rules."
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -58,4 +62,5 @@ runs:
         OPENAI_MAX_INPUT_TOKENS: ${{ inputs.max_input_tokens }}
         PR_NUMBER: ${{ inputs.pr_number }}
         AI_REVIEW_CONFIG_PATH: ${{ inputs.config_path }}
-        AI_REVIEW_CUSTOM_INSTRUCTIONS: ${{ inputs.custom_instructions }}
+        AI_REVIEW_MODE: ${{ inputs.review_mode }}
+        AI_REVIEW_MAX_PR_BODY_CHARS: ${{ inputs.max_pr_body_chars }}

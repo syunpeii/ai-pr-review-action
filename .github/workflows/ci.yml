@@ -1,0 +1,100 @@
+name: CI & Self Review Verification
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "検証対象のPR番号"
+        required: true
+        type: string
+      review_mode:
+        description: "Review mode (single / verified)"
+        required: false
+        default: "verified"
+        type: choice
+        options:
+          - verified
+          - single
+      model:
+        description: "OpenAI model name (空欄時はデフォルト)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build & Unit Test
+    if: github.event_name != 'pull_request' || github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run build and unit tests
+        run: npm test
+
+      - name: Verify dist and bundle are up to date
+        run: git diff --exit-code dist/ bundle/
+
+  verify-action:
+    name: Verify AI PR Review Action (E2E)
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action == 'labeled' &&
+        (
+          github.event.label.name == 'verify-ai-review' ||
+          github.event.label.name == 'verify-ai-review-single'
+        ) &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Determine review mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "review_mode=${{ inputs.review_mode || 'verified' }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.label.name }}" = "verify-ai-review-single" ]; then
+            echo "review_mode=single" >> "$GITHUB_OUTPUT"
+          else
+            echo "review_mode=verified" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run local AI PR Review Action
+        uses: ./
+        with:
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_number: ${{ inputs.pr_number || github.event.pull_request.number }}
+          review_mode: ${{ steps.mode.outputs.review_mode }}
+          model: ${{ inputs.model }}

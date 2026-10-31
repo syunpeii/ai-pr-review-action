@@ -70,7 +70,7 @@ export class GitHubService {
         const isKotlinFile = filename.endsWith('.kt');
         return isSmallFile || isConfigFile || (isKotlinFile && patch.split('\n').length < 100);
     }
-    async postSummaryComment(content, model, tokenUsage) {
+    async postSummaryComment(content, model, tokenUsage, metadata = '') {
         await this.deleteExistingSummaryComment();
         // 改行が適切に表示されるようにフォーマット
         const formattedContent = this.formatSummaryContent(content);
@@ -79,7 +79,7 @@ export class GitHubService {
             owner: this.config.owner,
             repo: this.config.repo,
             issue_number: this.config.pullNumber,
-            body: `## 🤖 AI レビュー結果\n\n${formattedContent}\n\n${footer}\n\n${SUMMARY_COMMENT_MARKER}`,
+            body: `## 🤖 AI レビュー結果\n\n${[formattedContent, metadata].filter(Boolean).join('\n\n')}\n\n${footer}\n\n${SUMMARY_COMMENT_MARKER}`,
         });
         this.existingCommentId = comment.id;
     }

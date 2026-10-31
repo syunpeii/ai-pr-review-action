@@ -1,0 +1,19 @@
+project_context: |
+  このリポジトリは OpenAI Responses API を用いて GitHub Pull Request を自動レビューする GitHub Action (TypeScript / Node.js 20) です。
+  - 配布用のバンドルファイルは `bundle/index.js`、トランスパイル成果物は `dist/` に出力されます。
+  - `test/fixtures/e2e/order-service.ts` は E2E レビュー検証用のサンプルモジュールであり、金額はすべて日本円（整数）として扱い、割引計算時の端数切り捨て（Math.floor）は業務仕様通りです。
+default_model: "gpt-6-luna"
+file_priorities:
+  ts: 10
+  mjs: 9
+  js: 8
+  yml: 7
+  json: 6
+  md: 5
+exclude_patterns:
+  - "bundle/**"
+  - "dist/**"
+  - "package-lock.json"
+  - "test/fixtures/e2e/README.md"
+  - "test/fixtures/e2e/apply-verify-diff.mjs"
+comment_language: "ja"
