@@ -3,11 +3,10 @@ import { readFileSync, existsSync } from 'fs';
 import { load } from 'js-yaml';
 import { resolve } from 'path';
 import { z } from 'zod';
+export const DEFAULT_MAX_PR_BODY_CHARS = 10_000;
+export const MAX_PROJECT_CONTEXT_CHARS = 30_000;
 const aiReviewConfigSchema = z.object({
-    reviewer_role: z.string().max(500).optional(),
-    tech_stack: z.string().max(2_000).optional(),
-    review_focus: z.string().max(2_000).optional(),
-    additional_rules: z.string().max(10_000).optional(),
+    project_context: z.string().max(MAX_PROJECT_CONTEXT_CHARS).optional(),
     default_model: z.string().min(1).max(200).optional(),
     file_priorities: z
         .record(z.string().min(1).max(50), z.number().int().min(1).max(10))
@@ -91,15 +90,12 @@ export function loadConfig() {
     }
     // .ai-review.yml設定ファイルを読み込み
     const aiReviewConfig = loadAIReviewConfig();
-    const customInstructions = process.env.AI_REVIEW_CUSTOM_INSTRUCTIONS ||
-        process.env.INPUT_CUSTOM_INSTRUCTIONS;
-    const additionalRules = [aiReviewConfig.additional_rules?.trim(), customInstructions?.trim()]
-        .filter((value) => Boolean(value))
-        .join('\n\n');
+    const projectContext = aiReviewConfig.project_context?.trim() || undefined;
+    const maxPrBodyChars = parseOptionalPositiveInteger(process.env.AI_REVIEW_MAX_PR_BODY_CHARS || process.env.INPUT_MAX_PR_BODY_CHARS, 'max_pr_body_chars') ?? DEFAULT_MAX_PR_BODY_CHARS;
     const openaiModel = process.env.OPENAI_MODEL ||
         process.env.INPUT_MODEL ||
         aiReviewConfig.default_model ||
-        'gpt-5-mini';
+        'gpt-6-luna';
     return {
         reviewMode: parseReviewMode(process.env.AI_REVIEW_MODE || process.env.INPUT_REVIEW_MODE),
         openaiApiKey: requiredEnvVars.openaiApiKey,
@@ -110,10 +106,8 @@ export function loadConfig() {
         owner,
         repo,
         pullNumber,
-        reviewerRole: aiReviewConfig.reviewer_role || '',
-        techStack: aiReviewConfig.tech_stack || '',
-        reviewFocus: aiReviewConfig.review_focus || '',
-        additionalRules: additionalRules || undefined,
+        projectContext,
+        maxPrBodyChars,
         filePriorities: aiReviewConfig.file_priorities || {
             kt: 10, gradle: 9, xml: 8, json: 7, yml: 6, md: 5
         },
@@ -123,6 +117,21 @@ export function loadConfig() {
         includePrBody: aiReviewConfig.include_pr_body !== false,
         includePrLabels: aiReviewConfig.include_pr_labels !== false,
     };
+}
+const REMOVED_FIELDS = {
+    reviewer_role: 'project_context に記載してください',
+    tech_stack: 'project_context に記載してください',
+    review_focus: 'project_context に記載してください',
+    additional_rules: 'project_context（共通情報）または PR 本文の AI_REVIEW_INSTRUCTIONS ブロック（今回だけの指示）に記載してください',
+};
+export function assertNoRemovedFields(raw) {
+    if (typeof raw !== 'object' || raw === null)
+        return;
+    const found = Object.keys(raw).filter((key) => key in REMOVED_FIELDS);
+    if (found.length === 0)
+        return;
+    throw new Error('v2 で削除された設定が含まれています: ' +
+        found.map((key) => `${key}（${REMOVED_FIELDS[key]}）`).join('、'));
 }
 function parseReviewMode(value) {
     const mode = value?.trim().toLowerCase();
@@ -152,7 +161,9 @@ function loadAIReviewConfig() {
     }
     try {
         const configContent = readFileSync(configPath, 'utf8');
-        const parsedConfig = aiReviewConfigSchema.safeParse(load(configContent));
+        const rawConfig = load(configContent);
+        assertNoRemovedFields(rawConfig);
+        const parsedConfig = aiReviewConfigSchema.safeParse(rawConfig);
         if (!parsedConfig.success) {
             const details = parsedConfig.error.issues
                 .map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`)

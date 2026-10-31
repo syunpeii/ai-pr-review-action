@@ -1,9 +1,7 @@
-reviewer_role: "シニアソフトウェアエンジニア"
-tech_stack: "TypeScript, Node.js, GitHub Actions"
-review_focus: "確実なバグ、壊れる変更、パフォーマンス劣化"
-additional_rules: |
-  憶測ではなく、現在の差分から断定できる問題のみ指摘してください。
-default_model: "gpt-5-mini"
+# 案件固有情報（業務仕様、設計上の制約、意図的な実装方針など）
+project_context: |
+  このサービスの日時は UTC で保存します。
+default_model: "gpt-6-luna"
 file_priorities:
   ts: 10
   js: 9

@@ -10,7 +10,6 @@ export type ReviewOutcome =
   | { status: 'single'; review: ReviewResult }
   | { status: 'verified'; review: ReviewResult }
   | {
-      /** 検証未完了: 未検証の候補は含めない */
       status: 'verification_failed';
       review: ReviewResult;
       reason: string;

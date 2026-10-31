@@ -4,6 +4,7 @@ import { GitHubService } from './github.js';
 import { OpenAIService } from './openai.js';
 import { ContextBuilder } from './context.js';
 import { runReview } from './review-runner.js';
+import { buildReviewMetadata } from './summary.js';
 function formatCommentBody(content) {
     if (!content)
         return '';
@@ -26,7 +27,10 @@ async function main() {
         console.log(`📋 PR #${config.pullNumber} をレビューします`);
         const github = new GitHubService(config);
         const openai = new OpenAIService(config);
-        const contextBuilder = new ContextBuilder(config.filePriorities, config.includePrTitle, config.includePrBody, config.includePrLabels);
+        const contextBuilder = new ContextBuilder(config.filePriorities, config.includePrTitle, config.includePrBody, config.includePrLabels, {
+            projectContext: config.projectContext,
+            maxPrBodyChars: config.maxPrBodyChars,
+        });
         console.log('📥 PR情報を取得中...');
         const prInfo = await github.getPRInfo();
         console.log(`📁 ${prInfo.files.length} ファイルの変更を検出`);
@@ -35,28 +39,29 @@ async function main() {
         const promptBudget = config.reviewMode === 'verified' && config.maxInputTokens !== undefined
             ? Math.max(1, Math.floor(config.maxInputTokens * 0.8))
             : config.maxInputTokens;
-        const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, promptBudget);
+        const { prompt, wasTruncated, usage, insufficient } = contextBuilder.buildPrompt(prInfo, promptBudget);
+        if (insufficient) {
+            const metadata = buildReviewMetadata({
+                runStatus: 'not_run',
+                usage,
+                reason: 'max_input_tokens が小さすぎるため、レビューに必要な入力を確保できませんでした。値を増やしてください。',
+            });
+            await github.postSummaryComment('', config.openaiModel, { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, metadata);
+            console.warn('⚠️  max_input_tokens が小さすぎるためレビューを実施せず、未実施の概要のみ投稿しました');
+            return;
+        }
         const outcome = await runReview(config, openai, prompt);
         const review = outcome.review;
-        // 確定した結果のみを投稿する（下書き・検証の内部理由は投稿しない）
-        if (outcome.status === 'verification_failed') {
-            review.summary =
-                '⚠️ **検証未完了**: 検証付きレビューの2回目が完了しなかったため、未検証の指摘は投稿していません。このPRに問題がないという意味ではありません。' +
-                    '\n\n**レビュー方式**: 検証付きレビュー（1回目のみ実行、検証未完了）';
-        }
-        else if (outcome.status === 'verified') {
-            review.summary += '\n\n**レビュー方式**: 検証付きレビュー（2段階完了）';
-        }
-        // トークン制限による切り詰めがあった場合の警告追加
-        if (wasTruncated) {
-            review.summary += '\n\n⚠️ **注意**: このPRは大きすぎるため、一部のファイル詳細を省略してレビューを行いました。重要な変更が見落とされている可能性があります。';
-        }
+        // formatCommentBody が太字直後の記号を崩すため、状態表示は整形を通さず付加する
+        const metadata = buildReviewMetadata({
+            runStatus: outcome.status,
+            usage,
+            wasTruncated,
+        });
         console.log('📝 レビューコメントを投稿中...');
         // 概要コメントを通常のIssueコメントとして投稿
-        if (review.summary) {
-            await github.postSummaryComment(formatCommentBody(review.summary), review.model, review.tokenUsage);
-            console.log('✅ 概要コメントをIssueコメントとして投稿しました');
-        }
+        await github.postSummaryComment(formatCommentBody(review.summary), review.model, review.tokenUsage, metadata);
+        console.log('✅ 概要コメントをIssueコメントとして投稿しました');
         // 行コメントを準備
         const reviewComments = review.lineComments.map(comment => {
             const tagEmoji = {
