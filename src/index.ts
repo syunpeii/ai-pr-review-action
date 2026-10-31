@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { GitHubService, type ReviewComment } from './github.js';
 import { OpenAIService } from './openai.js';
 import { ContextBuilder } from './context.js';
+import { runReview } from './review-runner.js';
 
 function formatCommentBody(content: string): string {
   if (!content) return '';
@@ -41,8 +42,23 @@ async function main(): Promise<void> {
     console.log(`📁 ${prInfo.files.length} ファイルの変更を検出`);
 
     console.log('🤖 AIレビューを生成中...');
-    const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, config.maxInputTokens);
-    const review = await openai.generateReview(prompt);
+    // verified では検証候補の入力領域を残すため、1回目のコード入力を少し絞る。
+    const promptBudget =
+      config.reviewMode === 'verified' && config.maxInputTokens !== undefined
+        ? Math.max(1, Math.floor(config.maxInputTokens * 0.8))
+        : config.maxInputTokens;
+    const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, promptBudget);
+    const outcome = await runReview(config, openai, prompt);
+    const review = outcome.review;
+
+    // 確定した結果のみを投稿する（下書き・検証の内部理由は投稿しない）
+    if (outcome.status === 'verification_failed') {
+      review.summary =
+        '⚠️ **検証未完了**: 検証付きレビューの2回目が完了しなかったため、未検証の指摘は投稿していません。このPRに問題がないという意味ではありません。' +
+        '\n\n**レビュー方式**: 検証付きレビュー（1回目のみ実行、検証未完了）';
+    } else if (outcome.status === 'verified') {
+      review.summary += '\n\n**レビュー方式**: 検証付きレビュー（2段階完了）';
+    }
 
     // トークン制限による切り詰めがあった場合の警告追加
     if (wasTruncated) {

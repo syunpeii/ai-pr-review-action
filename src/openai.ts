@@ -1,5 +1,6 @@
 // path: scripts/review/src/openai.ts
 import fetch from 'node-fetch';
+import { z } from 'zod';
 import type { Config } from './config.js';
 
 export interface TokenUsage {
@@ -23,6 +24,99 @@ export interface LineComment {
   suggestion?: string;
 }
 
+export interface ReviewCandidate extends LineComment {
+  id: string;
+}
+
+export class VerificationError extends Error {
+  constructor(message: string, public readonly tokenUsage?: TokenUsage) {
+    super(message);
+    this.name = 'VerificationError';
+  }
+}
+
+const commentTagSchema = z.enum(['critical', 'performance', 'style']);
+
+const revisedCommentSchema = z.object({
+  path: z.string().trim().min(1).refine((v) => !/[\r\n]/.test(v), '改行を含められません'),
+  line: z.number().int().positive(),
+  tag: commentTagSchema,
+  message: z.string().trim().min(1),
+  suggestion: z.string().trim().min(1).optional(),
+}).strict();
+
+const verificationResponseSchema = z.object({
+  summary: z.string().trim().min(1),
+  decisions: z.array(
+    z.object({
+      id: z.string().min(1),
+      verdict: z.enum(['keep', 'revise', 'drop']),
+      reason: z.string().optional(),
+      revised: revisedCommentSchema.optional(),
+    }).strict(),
+  ),
+}).strict();
+
+function extractJson(content: string): unknown {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return JSON.parse(fenced ? fenced[1] : trimmed);
+}
+
+/**
+ * 検証応答を厳密に検証し、採用・修正された候補だけから最終指摘を組み立てる。
+ * 形式不正・ID の重複/未知/判定漏れは例外とし、「問題なし」とは解釈しない。
+ */
+export function parseVerificationResponse(
+  content: string,
+  candidates: ReviewCandidate[],
+): { summary: string; lineComments: LineComment[] } {
+  let json: unknown;
+  try {
+    json = extractJson(content);
+  } catch {
+    throw new Error('JSONとして解析できません');
+  }
+
+  const parsed = verificationResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(
+      parsed.error.issues.map((i) => `${i.path.join('.') || 'root'}: ${i.message}`).join('; '),
+    );
+  }
+
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const seen = new Set<string>();
+  const decisions = new Map<string, z.infer<typeof verificationResponseSchema>['decisions'][number]>();
+  for (const decision of parsed.data.decisions) {
+    if (!byId.has(decision.id)) throw new Error(`未知の候補IDです: ${decision.id}`);
+    if (seen.has(decision.id)) throw new Error(`候補IDが重複しています: ${decision.id}`);
+    seen.add(decision.id);
+    if (decision.verdict === 'revise' && !decision.revised) {
+      throw new Error(`revise に修正版がありません: ${decision.id}`);
+    }
+    decisions.set(decision.id, decision);
+  }
+  const missing = candidates.filter((c) => !seen.has(c.id)).map((c) => c.id);
+  if (missing.length > 0) {
+    throw new Error(`判定が欠落している候補があります: ${missing.join(', ')}`);
+  }
+
+  const lineComments: LineComment[] = [];
+  for (const candidate of candidates) {
+    const decision = decisions.get(candidate.id)!;
+    if (decision.verdict === 'drop') continue;
+    if (decision.verdict === 'keep') {
+      const { id: _id, ...comment } = candidate;
+      lineComments.push(comment);
+    } else {
+      lineComments.push(decision.revised!);
+    }
+  }
+
+  return { summary: parsed.data.summary, lineComments };
+}
+
 export class OpenAIService {
   private config: Config;
   private fetchImpl: typeof fetch;
@@ -35,6 +129,92 @@ export class OpenAIService {
   async generateReview(prompt: string): Promise<ReviewResult> {
     const model = this.config.openaiModel;
     console.log(`🤖 使用モデル: ${model}`);
+
+    const { content, tokenUsage } = await this.callModel(this.getSystemPrompt(), prompt);
+    const { summary, lineComments } = this.parseReviewResponse(content);
+    return {
+      summary,
+      lineComments,
+      model,
+      tokenUsage,
+    };
+  }
+
+  /**
+   * 下書きレビューを元のコンテキストと照合して検証し、確定版を返す。
+   * 検証に失敗した場合は VerificationError を投げる（未検証の候補は返さない）。
+   */
+  async verifyReview(prompt: string, draft: ReviewResult): Promise<ReviewResult> {
+    const model = this.config.openaiModel;
+    console.log(`🔎 検証レビューを実行中 (モデル: ${model})`);
+
+    const candidates: ReviewCandidate[] = draft.lineComments.map((comment, index) => ({
+      ...comment,
+      id: `C${index + 1}`,
+    }));
+    const verificationInput = this.buildVerificationInput(prompt, draft.summary, candidates);
+
+    let content: string;
+    let usage: TokenUsage;
+    let truncated: boolean;
+    try {
+      ({ content, tokenUsage: usage, truncated } = await this.callModel(
+        this.getVerificationSystemPrompt(),
+        verificationInput,
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new VerificationError(`検証APIの呼び出しに失敗しました: ${message}`);
+    }
+
+    if (truncated) {
+      throw new VerificationError('検証応答がトークン制限により途中で切断されました', usage);
+    }
+
+    try {
+      const { summary, lineComments } = parseVerificationResponse(content, candidates);
+      return { summary, lineComments, model, tokenUsage: usage };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new VerificationError(`検証結果が不正です: ${message}`, usage);
+    }
+  }
+
+  private buildVerificationInput(
+    prompt: string,
+    draftSummary: string,
+    candidates: ReviewCandidate[],
+  ): string {
+    return `# レビュー対象のコンテキスト（検証の根拠となる一次情報）
+
+${prompt}
+
+# 検証対象: 下書きレビュー（権威ある正解ではありません）
+
+## 下書きの概要
+${draftSummary || '（なし）'}
+
+## 指摘候補（JSON）
+${JSON.stringify(candidates, null, 2)}`;
+  }
+
+  /** 検証入力の概算トークン数 */
+  estimateVerificationTokens(prompt: string, draft: ReviewResult): number {
+    const candidates: ReviewCandidate[] = draft.lineComments.map((comment, index) => ({
+      ...comment,
+      id: `C${index + 1}`,
+    }));
+    const text =
+      this.getVerificationSystemPrompt() +
+      this.buildVerificationInput(prompt, draft.summary, candidates);
+    return Math.ceil(text.length / 3.5);
+  }
+
+  private async callModel(
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<{ content: string; tokenUsage: TokenUsage; truncated: boolean }> {
+    const model = this.config.openaiModel;
 
     const response = await this.fetchImpl('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -49,21 +229,11 @@ export class OpenAIService {
         input: [
           {
             role: 'system',
-            content: [
-              {
-                type: 'input_text',
-                text: this.getSystemPrompt(),
-              },
-            ],
+            content: [{ type: 'input_text', text: systemPrompt }],
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: prompt,
-              },
-            ],
+            content: [{ type: 'input_text', text: userPrompt }],
           },
         ],
         ...(this.config.maxOutputTokens === undefined
@@ -84,14 +254,14 @@ export class OpenAIService {
       ? data?.incomplete_details?.reason ?? 'incomplete'
       : data?.status ?? data?.output?.[0]?.status;
     const tokens = data?.usage;
-    
+
     console.log('🔍 API統計:', {
       コンテンツ長: content?.length || 0,
       終了理由: finishReason,
       入力トークン: tokens?.input_tokens,
       出力トークン: tokens?.output_tokens
     });
-    
+
     if (!content) {
       if (finishReason === 'incomplete' || finishReason === 'max_output_tokens') {
         throw new Error('❌ レスポンスがトークン制限により途中で切断されました。OPENAI_MAX_OUTPUT_TOKENS の値を増やしてください。');
@@ -109,12 +279,10 @@ export class OpenAIService {
       totalTokens: tokens?.total_tokens || ((tokens?.input_tokens || 0) + (tokens?.output_tokens || 0)),
     };
 
-    const { summary, lineComments } = this.parseReviewResponse(content);
     return {
-      summary,
-      lineComments,
-      model,
+      content,
       tokenUsage,
+      truncated: finishReason === 'incomplete' || finishReason === 'max_output_tokens',
     };
   }
 
@@ -137,6 +305,50 @@ export class OpenAIService {
 
     const joined = texts.join('\n').trim();
     return joined || undefined;
+  }
+
+  private getVerificationSystemPrompt(): string {
+    const language = (this.config.commentLanguage || 'ja').trim().toLowerCase();
+    const languageInstruction = language === 'en'
+      ? 'Write summary, message and suggestion in English.'
+      : 'summary、message、suggestion は日本語で記述してください。';
+
+    return `あなたはPRレビューの検証担当です。下書きレビューの指摘候補を、PRのコード（一次情報）と照合して検証します。
+下書きの文章は権威ある正解ではありません。コードから自分で確認してください。
+
+## 検証内容
+各候補について次を確認します。
+- コード上の根拠が存在するか
+- 問題が発生する条件と影響が具体的か
+- 既存の処理（別の箇所での対処、型・ガード等）で既に対処されていないか
+- 説明・修正案が妥当か（パス・行番号・タグも含む）
+
+## 判定
+- keep: そのまま妥当
+- revise: 問題は存在するが説明・修正案・行番号・タグに問題があるため修正版を返す
+- drop: 誤指摘、または根拠不足
+
+新規の指摘を追加してはいけません。候補の採用・修正・却下のみを行ってください。
+「確実に問題が存在すると断定できる」ものだけを残し、推測・曖昧な提案は drop してください。
+タグの意味: critical=確実に修正が必要な不具合、performance=具体的に確認できる非効率・可読性の問題、style=typo・明確な規約違反。
+
+## 出力形式
+次のJSONオブジェクトのみを出力してください（前後の説明文・コードフェンスは禁止）。
+{
+  "summary": "最終的な指摘と整合するPR全体の評価（1-3文）。却下した問題に言及しない",
+  "decisions": [
+    { "id": "C1", "verdict": "keep", "reason": "内部用の理由" },
+    { "id": "C2", "verdict": "revise", "reason": "内部用の理由",
+      "revised": { "path": "src/a.ts", "line": 12, "tag": "critical", "message": "...", "suggestion": "（任意）" } },
+    { "id": "C3", "verdict": "drop", "reason": "内部用の理由" }
+  ]
+}
+- すべての候補IDについて、ちょうど1つの判定を含めること（候補が0件なら decisions は空配列）
+- reason は投稿されない内部用メモ。revised は verdict が revise のときのみ
+- summary は候補が0件でも、下書きの概要を検証して必ず返すこと
+
+## 言語指定
+${languageInstruction}`;
   }
 
   private getSystemPrompt(): string {

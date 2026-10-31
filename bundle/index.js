@@ -4130,7 +4130,7 @@ module.exports = globalThis.DOMException
 /***/ 560:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var wrappy = __nccwpck_require__(883)
+var wrappy = __nccwpck_require__(264)
 module.exports = wrappy(once)
 module.exports.strict = wrappy(onceStrict)
 
@@ -8944,7 +8944,7 @@ exports.getUserAgent = getUserAgent;
 
 /***/ }),
 
-/***/ 883:
+/***/ 264:
 /***/ ((module) => {
 
 // Returns a wrapper function that returns a wrapped callback
@@ -17090,6 +17090,7 @@ function loadConfig() {
         aiReviewConfig.default_model ||
         'gpt-5-mini';
     return {
+        reviewMode: parseReviewMode(process.env.AI_REVIEW_MODE || process.env.INPUT_REVIEW_MODE),
         openaiApiKey: requiredEnvVars.openaiApiKey,
         openaiModel,
         githubToken: requiredEnvVars.githubToken,
@@ -17111,6 +17112,14 @@ function loadConfig() {
         includePrBody: aiReviewConfig.include_pr_body !== false,
         includePrLabels: aiReviewConfig.include_pr_labels !== false,
     };
+}
+function parseReviewMode(value) {
+    const mode = value?.trim().toLowerCase();
+    if (!mode)
+        return 'single';
+    if (mode === 'single' || mode === 'verified')
+        return mode;
+    throw new Error('❌ review_mode には single または verified を指定してください');
 }
 function parseOptionalPositiveInteger(value, name) {
     if (!value?.trim())
@@ -22350,6 +22359,86 @@ function fixResponseChunkedTransferBadEnding(request, errorCallback) {
 ;// CONCATENATED MODULE: ./dist/openai.js
 // path: scripts/review/src/openai.ts
 
+
+class VerificationError extends Error {
+    tokenUsage;
+    constructor(message, tokenUsage) {
+        super(message);
+        this.tokenUsage = tokenUsage;
+        this.name = 'VerificationError';
+    }
+}
+const commentTagSchema = enumType(['critical', 'performance', 'style']);
+const revisedCommentSchema = objectType({
+    path: stringType().trim().min(1).refine((v) => !/[\r\n]/.test(v), '改行を含められません'),
+    line: numberType().int().positive(),
+    tag: commentTagSchema,
+    message: stringType().trim().min(1),
+    suggestion: stringType().trim().min(1).optional(),
+}).strict();
+const verificationResponseSchema = objectType({
+    summary: stringType().trim().min(1),
+    decisions: arrayType(objectType({
+        id: stringType().min(1),
+        verdict: enumType(['keep', 'revise', 'drop']),
+        reason: stringType().optional(),
+        revised: revisedCommentSchema.optional(),
+    }).strict()),
+}).strict();
+function extractJson(content) {
+    const trimmed = content.trim();
+    const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    return JSON.parse(fenced ? fenced[1] : trimmed);
+}
+/**
+ * 検証応答を厳密に検証し、採用・修正された候補だけから最終指摘を組み立てる。
+ * 形式不正・ID の重複/未知/判定漏れは例外とし、「問題なし」とは解釈しない。
+ */
+function parseVerificationResponse(content, candidates) {
+    let json;
+    try {
+        json = extractJson(content);
+    }
+    catch {
+        throw new Error('JSONとして解析できません');
+    }
+    const parsed = verificationResponseSchema.safeParse(json);
+    if (!parsed.success) {
+        throw new Error(parsed.error.issues.map((i) => `${i.path.join('.') || 'root'}: ${i.message}`).join('; '));
+    }
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const seen = new Set();
+    const decisions = new Map();
+    for (const decision of parsed.data.decisions) {
+        if (!byId.has(decision.id))
+            throw new Error(`未知の候補IDです: ${decision.id}`);
+        if (seen.has(decision.id))
+            throw new Error(`候補IDが重複しています: ${decision.id}`);
+        seen.add(decision.id);
+        if (decision.verdict === 'revise' && !decision.revised) {
+            throw new Error(`revise に修正版がありません: ${decision.id}`);
+        }
+        decisions.set(decision.id, decision);
+    }
+    const missing = candidates.filter((c) => !seen.has(c.id)).map((c) => c.id);
+    if (missing.length > 0) {
+        throw new Error(`判定が欠落している候補があります: ${missing.join(', ')}`);
+    }
+    const lineComments = [];
+    for (const candidate of candidates) {
+        const decision = decisions.get(candidate.id);
+        if (decision.verdict === 'drop')
+            continue;
+        if (decision.verdict === 'keep') {
+            const { id: _id, ...comment } = candidate;
+            lineComments.push(comment);
+        }
+        else {
+            lineComments.push(decision.revised);
+        }
+    }
+    return { summary: parsed.data.summary, lineComments };
+}
 class OpenAIService {
     config;
     fetchImpl;
@@ -22360,6 +22449,74 @@ class OpenAIService {
     async generateReview(prompt) {
         const model = this.config.openaiModel;
         console.log(`🤖 使用モデル: ${model}`);
+        const { content, tokenUsage } = await this.callModel(this.getSystemPrompt(), prompt);
+        const { summary, lineComments } = this.parseReviewResponse(content);
+        return {
+            summary,
+            lineComments,
+            model,
+            tokenUsage,
+        };
+    }
+    /**
+     * 下書きレビューを元のコンテキストと照合して検証し、確定版を返す。
+     * 検証に失敗した場合は VerificationError を投げる（未検証の候補は返さない）。
+     */
+    async verifyReview(prompt, draft) {
+        const model = this.config.openaiModel;
+        console.log(`🔎 検証レビューを実行中 (モデル: ${model})`);
+        const candidates = draft.lineComments.map((comment, index) => ({
+            ...comment,
+            id: `C${index + 1}`,
+        }));
+        const verificationInput = this.buildVerificationInput(prompt, draft.summary, candidates);
+        let content;
+        let usage;
+        let truncated;
+        try {
+            ({ content, tokenUsage: usage, truncated } = await this.callModel(this.getVerificationSystemPrompt(), verificationInput));
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new VerificationError(`検証APIの呼び出しに失敗しました: ${message}`);
+        }
+        if (truncated) {
+            throw new VerificationError('検証応答がトークン制限により途中で切断されました', usage);
+        }
+        try {
+            const { summary, lineComments } = parseVerificationResponse(content, candidates);
+            return { summary, lineComments, model, tokenUsage: usage };
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new VerificationError(`検証結果が不正です: ${message}`, usage);
+        }
+    }
+    buildVerificationInput(prompt, draftSummary, candidates) {
+        return `# レビュー対象のコンテキスト（検証の根拠となる一次情報）
+
+${prompt}
+
+# 検証対象: 下書きレビュー（権威ある正解ではありません）
+
+## 下書きの概要
+${draftSummary || '（なし）'}
+
+## 指摘候補（JSON）
+${JSON.stringify(candidates, null, 2)}`;
+    }
+    /** 検証入力の概算トークン数 */
+    estimateVerificationTokens(prompt, draft) {
+        const candidates = draft.lineComments.map((comment, index) => ({
+            ...comment,
+            id: `C${index + 1}`,
+        }));
+        const text = this.getVerificationSystemPrompt() +
+            this.buildVerificationInput(prompt, draft.summary, candidates);
+        return Math.ceil(text.length / 3.5);
+    }
+    async callModel(systemPrompt, userPrompt) {
+        const model = this.config.openaiModel;
         const response = await this.fetchImpl('https://api.openai.com/v1/responses', {
             method: 'POST',
             headers: {
@@ -22373,21 +22530,11 @@ class OpenAIService {
                 input: [
                     {
                         role: 'system',
-                        content: [
-                            {
-                                type: 'input_text',
-                                text: this.getSystemPrompt(),
-                            },
-                        ],
+                        content: [{ type: 'input_text', text: systemPrompt }],
                     },
                     {
                         role: 'user',
-                        content: [
-                            {
-                                type: 'input_text',
-                                text: prompt,
-                            },
-                        ],
+                        content: [{ type: 'input_text', text: userPrompt }],
                     },
                 ],
                 ...(this.config.maxOutputTokens === undefined
@@ -22425,12 +22572,10 @@ class OpenAIService {
             completionTokens: tokens?.output_tokens || 0,
             totalTokens: tokens?.total_tokens || ((tokens?.input_tokens || 0) + (tokens?.output_tokens || 0)),
         };
-        const { summary, lineComments } = this.parseReviewResponse(content);
         return {
-            summary,
-            lineComments,
-            model,
+            content,
             tokenUsage,
+            truncated: finishReason === 'incomplete' || finishReason === 'max_output_tokens',
         };
     }
     extractResponseText(data) {
@@ -22449,6 +22594,48 @@ class OpenAIService {
         }
         const joined = texts.join('\n').trim();
         return joined || undefined;
+    }
+    getVerificationSystemPrompt() {
+        const language = (this.config.commentLanguage || 'ja').trim().toLowerCase();
+        const languageInstruction = language === 'en'
+            ? 'Write summary, message and suggestion in English.'
+            : 'summary、message、suggestion は日本語で記述してください。';
+        return `あなたはPRレビューの検証担当です。下書きレビューの指摘候補を、PRのコード（一次情報）と照合して検証します。
+下書きの文章は権威ある正解ではありません。コードから自分で確認してください。
+
+## 検証内容
+各候補について次を確認します。
+- コード上の根拠が存在するか
+- 問題が発生する条件と影響が具体的か
+- 既存の処理（別の箇所での対処、型・ガード等）で既に対処されていないか
+- 説明・修正案が妥当か（パス・行番号・タグも含む）
+
+## 判定
+- keep: そのまま妥当
+- revise: 問題は存在するが説明・修正案・行番号・タグに問題があるため修正版を返す
+- drop: 誤指摘、または根拠不足
+
+新規の指摘を追加してはいけません。候補の採用・修正・却下のみを行ってください。
+「確実に問題が存在すると断定できる」ものだけを残し、推測・曖昧な提案は drop してください。
+タグの意味: critical=確実に修正が必要な不具合、performance=具体的に確認できる非効率・可読性の問題、style=typo・明確な規約違反。
+
+## 出力形式
+次のJSONオブジェクトのみを出力してください（前後の説明文・コードフェンスは禁止）。
+{
+  "summary": "最終的な指摘と整合するPR全体の評価（1-3文）。却下した問題に言及しない",
+  "decisions": [
+    { "id": "C1", "verdict": "keep", "reason": "内部用の理由" },
+    { "id": "C2", "verdict": "revise", "reason": "内部用の理由",
+      "revised": { "path": "src/a.ts", "line": 12, "tag": "critical", "message": "...", "suggestion": "（任意）" } },
+    { "id": "C3", "verdict": "drop", "reason": "内部用の理由" }
+  ]
+}
+- すべての候補IDについて、ちょうど1つの判定を含めること（候補が0件なら decisions は空配列）
+- reason は投稿されない内部用メモ。revised は verdict が revise のときのみ
+- summary は候補が0件でも、下書きの概要を検証して必ず返すこと
+
+## 言語指定
+${languageInstruction}`;
     }
     getSystemPrompt() {
         const additionalRulesSection = this.config.additionalRules
@@ -23975,8 +24162,65 @@ class ContextBuilder {
     }
 }
 
+;// CONCATENATED MODULE: ./dist/review-runner.js
+
+function addUsage(a, b) {
+    if (!b)
+        return a;
+    return {
+        promptTokens: a.promptTokens + b.promptTokens,
+        completionTokens: a.completionTokens + b.completionTokens,
+        totalTokens: a.totalTokens + b.totalTokens,
+    };
+}
+/**
+ * レビューを生成し、verified モードでは検証・修正した最終結果を確定する。
+ * ここでは GitHub への投稿を行わない（呼び出し側が確定結果のみを投稿する）。
+ */
+async function runReview(config, openai, prompt) {
+    const draft = await openai.generateReview(prompt);
+    if (config.reviewMode !== 'verified') {
+        return { status: 'single', review: draft };
+    }
+    const failed = (reason, extra) => {
+        console.warn(`⚠️  検証未完了: ${reason}`);
+        return {
+            status: 'verification_failed',
+            reason,
+            review: {
+                summary: '',
+                lineComments: [],
+                model: draft.model,
+                tokenUsage: addUsage(draft.tokenUsage, extra),
+            },
+        };
+    };
+    // 候補全体が2回目の入力に収まらない場合は、候補を落とさず検証未完了とする。
+    if (config.maxInputTokens !== undefined &&
+        openai.estimateVerificationTokens(prompt, draft) > config.maxInputTokens) {
+        return failed('下書きと候補が検証の入力上限に収まりませんでした');
+    }
+    try {
+        const verified = await openai.verifyReview(prompt, draft);
+        return {
+            status: 'verified',
+            review: {
+                ...verified,
+                tokenUsage: addUsage(draft.tokenUsage, verified.tokenUsage),
+            },
+        };
+    }
+    catch (error) {
+        if (error instanceof VerificationError) {
+            return failed(error.message, error.tokenUsage);
+        }
+        throw error;
+    }
+}
+
 ;// CONCATENATED MODULE: ./dist/index.js
 // path: scripts/review/src/index.ts
+
 
 
 
@@ -24008,8 +24252,22 @@ async function main() {
         const prInfo = await github.getPRInfo();
         console.log(`📁 ${prInfo.files.length} ファイルの変更を検出`);
         console.log('🤖 AIレビューを生成中...');
-        const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, config.maxInputTokens);
-        const review = await openai.generateReview(prompt);
+        // verified では検証候補の入力領域を残すため、1回目のコード入力を少し絞る。
+        const promptBudget = config.reviewMode === 'verified' && config.maxInputTokens !== undefined
+            ? Math.max(1, Math.floor(config.maxInputTokens * 0.8))
+            : config.maxInputTokens;
+        const { prompt, wasTruncated } = contextBuilder.buildPrompt(prInfo, promptBudget);
+        const outcome = await runReview(config, openai, prompt);
+        const review = outcome.review;
+        // 確定した結果のみを投稿する（下書き・検証の内部理由は投稿しない）
+        if (outcome.status === 'verification_failed') {
+            review.summary =
+                '⚠️ **検証未完了**: 検証付きレビューの2回目が完了しなかったため、未検証の指摘は投稿していません。このPRに問題がないという意味ではありません。' +
+                    '\n\n**レビュー方式**: 検証付きレビュー（1回目のみ実行、検証未完了）';
+        }
+        else if (outcome.status === 'verified') {
+            review.summary += '\n\n**レビュー方式**: 検証付きレビュー（2段階完了）';
+        }
         // トークン制限による切り詰めがあった場合の警告追加
         if (wasTruncated) {
             review.summary += '\n\n⚠️ **注意**: このPRは大きすぎるため、一部のファイル詳細を省略してレビューを行いました。重要な変更が見落とされている可能性があります。';

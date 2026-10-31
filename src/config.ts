@@ -4,7 +4,10 @@ import { load } from 'js-yaml';
 import { resolve } from 'path';
 import { z } from 'zod';
 
+export type ReviewMode = 'single' | 'verified';
+
 export interface Config {
+  reviewMode: ReviewMode;
   openaiApiKey: string;
   openaiModel: string;
   githubToken: string;
@@ -149,6 +152,7 @@ export function loadConfig(): Config {
     'gpt-5-mini';
 
   return {
+    reviewMode: parseReviewMode(process.env.AI_REVIEW_MODE || process.env.INPUT_REVIEW_MODE),
     openaiApiKey: requiredEnvVars.openaiApiKey!,
     openaiModel,
     githubToken: requiredEnvVars.githubToken!,
@@ -170,6 +174,13 @@ export function loadConfig(): Config {
     includePrBody: aiReviewConfig.include_pr_body !== false,
     includePrLabels: aiReviewConfig.include_pr_labels !== false,
   };
+}
+
+function parseReviewMode(value: string | undefined): ReviewMode {
+  const mode = value?.trim().toLowerCase();
+  if (!mode) return 'single';
+  if (mode === 'single' || mode === 'verified') return mode;
+  throw new Error('❌ review_mode には single または verified を指定してください');
 }
 
 function parseOptionalPositiveInteger(value: string | undefined, name: string): number | undefined {

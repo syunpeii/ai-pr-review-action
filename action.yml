@@ -25,6 +25,10 @@ inputs:
     description: "Approximate maximum input tokens sent to OpenAI. Leave empty for no Action-level truncation."
     required: false
     default: ""
+  review_mode:
+    description: "Review mode: 'single' (default, one pass) or 'verified' (generate a draft, then verify it against the code before posting)."
+    required: false
+    default: "single"
   pr_number:
     description: "PR number to review. If omitted, detected from event payload."
     required: false
@@ -59,3 +63,4 @@ runs:
         PR_NUMBER: ${{ inputs.pr_number }}
         AI_REVIEW_CONFIG_PATH: ${{ inputs.config_path }}
         AI_REVIEW_CUSTOM_INSTRUCTIONS: ${{ inputs.custom_instructions }}
+        AI_REVIEW_MODE: ${{ inputs.review_mode }}

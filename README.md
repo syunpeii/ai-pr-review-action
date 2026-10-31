@@ -130,9 +130,19 @@ jobs:
 | `model` | no | `.ai-review.yml` の `default_model` → `gpt-5-mini` | 使用する OpenAI モデル。空文字の場合は設定ファイルのデフォルトを使用 |
 | `max_output_tokens` | no | unset | OpenAI Responses API の最大出力トークン。未指定時は Action 側で出力を制限しない。 |
 | `max_input_tokens` | no | unset | OpenAI に送る入力の概算最大トークン。未指定時は Action 側で PR 情報を切り詰めない。指定時は `file_priorities` 順に収める。 |
+| `review_mode` | no | `single` | `single`: 1回のレビュー。`verified`: 下書きの指摘候補を元のコードと照合して採用・修正・却下し、確定結果のみ投稿する（API を2回呼ぶため、時間とトークンが増える）。 |
 | `pr_number` | no | auto-detect | レビュー対象PR番号 |
 | `config_path` | no | `.ai-review.yml` | レビュー設定ファイルのパス |
 | `custom_instructions` | no | `""` | 実行時に追加するレビュー指示 |
+
+## 検証付きレビュー (`review_mode: verified`)
+
+1回目で下書きを生成し、2回目で同じコンテキストと指摘候補を照合します。投稿されるのは検証後の概要と指摘のみで、下書きや検証の内部理由は投稿されません。
+
+- 検証が失敗した場合（API エラー、不正・途切れた応答、候補が入力上限に収まらない等）は、未検証の指摘を投稿せず、「検証未完了」の警告概要のみを投稿します（ワークフローは失敗しません）。
+- `max_input_tokens` 指定時、`verified` では1回目のコード入力を上限の80%程度に絞り、候補の領域を確保します。
+- 両段階で `model` を使用し、投稿されるトークン使用量は両段階の合計です。
+- AI による検証は正しさを保証するものではありません。同じモデルが同じ誤りを繰り返す可能性があります。
 
 ## Configuration file
 

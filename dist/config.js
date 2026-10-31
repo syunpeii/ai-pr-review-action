@@ -101,6 +101,7 @@ export function loadConfig() {
         aiReviewConfig.default_model ||
         'gpt-5-mini';
     return {
+        reviewMode: parseReviewMode(process.env.AI_REVIEW_MODE || process.env.INPUT_REVIEW_MODE),
         openaiApiKey: requiredEnvVars.openaiApiKey,
         openaiModel,
         githubToken: requiredEnvVars.githubToken,
@@ -122,6 +123,14 @@ export function loadConfig() {
         includePrBody: aiReviewConfig.include_pr_body !== false,
         includePrLabels: aiReviewConfig.include_pr_labels !== false,
     };
+}
+function parseReviewMode(value) {
+    const mode = value?.trim().toLowerCase();
+    if (!mode)
+        return 'single';
+    if (mode === 'single' || mode === 'verified')
+        return mode;
+    throw new Error('❌ review_mode には single または verified を指定してください');
 }
 function parseOptionalPositiveInteger(value, name) {
     if (!value?.trim())
