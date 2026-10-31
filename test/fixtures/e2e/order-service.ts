@@ -3,6 +3,13 @@ export interface CatalogItem {
   name: string;
   unitPrice: number;
   taxExempt?: boolean;
+  category?: string;
+}
+
+export interface Coupon {
+  code: string;
+  discountRate: number;
+  targetCategory?: string;
 }
 
 export interface OrderLine {
@@ -14,13 +21,16 @@ export interface OrderInput {
   orderId: string;
   customerId: string;
   lines: OrderLine[];
+  coupon?: Coupon;
 }
 
 export interface OrderSummary {
   orderId: string;
   subtotal: number;
+  discount: number;
   tax: number;
   total: number;
+  averageUnitPrice: number;
 }
 
 export interface AuditLogger {
@@ -33,33 +43,44 @@ export function calculateOrderSummary(
   order: OrderInput,
   catalog: CatalogItem[],
 ): OrderSummary {
-  const catalogBySku = new Map(catalog.map((item) => [item.sku, item]));
-
   let subtotal = 0;
+  let discount = 0;
   let taxableAmount = 0;
 
   for (const line of order.lines) {
-    if (line.quantity <= 0) {
-      throw new Error(`Invalid quantity for SKU: ${line.sku}`);
-    }
-    const item = catalogBySku.get(line.sku);
+    const item = catalog.find((entry) => entry.sku === line.sku);
     if (!item) {
       throw new Error(`Unknown SKU: ${line.sku}`);
     }
 
     const lineAmount = item.unitPrice * line.quantity;
     subtotal += lineAmount;
+
+    if (order.coupon) {
+      const matchedItems = catalog.filter(
+        (entry) => !order.coupon?.targetCategory || entry.category === order.coupon.targetCategory,
+      );
+      if (matchedItems.some((entry) => entry.sku === line.sku)) {
+        discount += Math.floor(lineAmount * order.coupon.discountRate);
+      }
+    }
+
     if (!item.taxExempt) {
       taxableAmount += lineAmount;
     }
   }
 
+  const discountedSubtotal = subtotal - discount;
   const tax = Math.floor(taxableAmount * TAX_RATE);
+  const averageUnitPrice = Math.floor(discountedSubtotal / order.lines.length);
+
   return {
     orderId: order.orderId,
     subtotal,
+    discount,
     tax,
-    total: subtotal + tax,
+    total: discountedSubtotal + tax,
+    averageUnitPrice,
   };
 }
 
@@ -69,7 +90,7 @@ export async function finalizeOrder(
   auditLogger: AuditLogger,
 ): Promise<OrderSummary> {
   const summary = calculateOrderSummary(order, catalog);
-  await auditLogger.record({
+  auditLogger.record({
     orderId: order.orderId,
     customerId: order.customerId,
     total: summary.total,
