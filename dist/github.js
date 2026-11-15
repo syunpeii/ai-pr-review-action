@@ -25,7 +25,9 @@ export class GitHubService {
                 status: file.status,
                 patch: file.patch,
             };
-            if (this.shouldFetchFullContent(file.filename, file.patch)) {
+            // A removed path does not exist at the PR head. The patch returned by
+            // pulls.listFiles is the available source for reviewing deleted files.
+            if (file.status !== 'removed' && this.shouldFetchFullContent(file.filename, file.patch)) {
                 try {
                     const { data: content } = await this.octokit.rest.repos.getContent({
                         owner: this.config.owner,
